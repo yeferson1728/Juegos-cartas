@@ -181,6 +181,7 @@ export const createGame = ({ players = [] } = {}) => {
     status: p?.status ?? "ACTIVE",
     handAnalysis: null,
     hasChangedHand: false,
+    aceChoices: {}, // Decisiones del jugador sobre el valor de los Ases
   }));
 
   const game = {
@@ -216,6 +217,19 @@ export const startGame = (gameId) => {
     throw new Error("La partida ya está en curso");
   }
 
+  // VALIDAR QUE TODOS LOS JUGADORES (excepto Casa) HAYAN APOSTADO
+  if (game.state === "WAITING") {
+    const playersWithoutBets = game.players.filter(
+      (p) => !p.isHouse && p.bet === 0
+    );
+    if (playersWithoutBets.length > 0) {
+      const names = playersWithoutBets.map((p) => p.name).join(", ");
+      throw new Error(
+        `Todos los jugadores deben apostar antes de iniciar. Falta: ${names}`
+      );
+    }
+  }
+
   // Si no hay Casa asignada, asignar al primer jugador
   if (!game.houseId && game.players.length > 0) {
     game.houseId = game.players[0].id;
@@ -223,13 +237,14 @@ export const startGame = (gameId) => {
     if (house) house.isHouse = true;
   }
 
-  // Reset manos y estado (mantener isHouse)
+  // Reset manos y estado (mantener isHouse y créditos, pero NO las apuestas)
   game.players.forEach((p) => {
     p.hand = [];
     p.status = "ACTIVE";
-    p.bet = p.bet ?? 0;
+    // NO resetear bet aquí - ya fue deducida al apostar
     p.handAnalysis = null;
     p.hasChangedHand = false;
+    p.aceChoices = {}; // Reset decisiones de Ases
   });
 
   // ESTABLECER ORDEN DE JUEGO (todos excepto la Casa)
@@ -256,7 +271,7 @@ export const startGame = (gameId) => {
 
   // Analizar manos iniciales y detectar reglas especiales
   game.players.forEach((p) => {
-    const analysis = analyzeHand(p.hand);
+    const analysis = analyzeHand(p.hand, p.aceChoices);
     p.handAnalysis = analysis;
 
     // Si tiene Doble 2 o Doble As, se planta automáticamente
@@ -267,10 +282,11 @@ export const startGame = (gameId) => {
       );
     }
 
-    // 🏆 REGLA: Si saca 21 con las 2 primeras cartas, se convierte en nueva Casa
+    // 🏆 REGLA: Si saca 21 con las 2 primeras cartas (21 natural)
+    // Los Ases valen 11 automáticamente (no hay decisión)
     if (analysis.is21 && !p.isHouse && !newHouseId) {
       newHouseId = p.id;
-      console.log(`🏆 ${p.name} sacó 21 con las primeras 2 cartas!`);
+      console.log(`🏆 ${p.name} sacó 21 natural con las primeras 2 cartas!`);
     }
   });
 
@@ -403,6 +419,9 @@ export const hit = (gameId, playerId) => {
         bonusMultiplier: analysis.bonusMultiplier,
         cardCountMultiplier: analysis.cardCountMultiplier,
         totalMultiplier: totalMultiplier,
+        hasAces: analysis.hasAces,
+        aceCount: analysis.aceCount,
+        aceIndices: analysis.aceIndices,
       },
     },
     card: card,
@@ -459,7 +478,7 @@ export const stand = (gameId, playerId) => {
     throw new Error(`No es tu turno. Turno actual: ${player.name}`);
   }
 
-  const analysis = analyzeHand(player.hand);
+  const analysis = analyzeHand(player.hand, player.aceChoices);
   player.handAnalysis = analysis;
 
   // Cambiar status a STAND (incluso si está BUST)
@@ -522,7 +541,7 @@ export const changeHand = (gameId, playerId) => {
     throw new Error("Solo puedes cambiar la mano inicial (2 cartas)");
   }
 
-  const analysis = analyzeHand(player.hand);
+  const analysis = analyzeHand(player.hand, player.aceChoices);
   if (!analysis.canChangeHand) {
     throw new Error("Solo puedes cambiar la mano si sumas 12");
   }
@@ -535,6 +554,7 @@ export const changeHand = (gameId, playerId) => {
   const oldHand = [...player.hand];
   game.discardPile.push(...oldHand);
   player.hand = [];
+  player.aceChoices = {}; // Reset decisiones de Ases
 
   console.log(
     `♻️ ${player.name} descartó 2 cartas. Total descartadas: ${game.discardPile.length}`
@@ -548,7 +568,7 @@ export const changeHand = (gameId, playerId) => {
 
   player.hasChangedHand = true;
 
-  const newAnalysis = analyzeHand(player.hand);
+  const newAnalysis = analyzeHand(player.hand, player.aceChoices);
   player.handAnalysis = newAnalysis;
 
   return {
@@ -561,6 +581,8 @@ export const changeHand = (gameId, playerId) => {
       handTotal: newAnalysis.total,
       status: player.status,
       hasChangedHand: true,
+      hasAces: newAnalysis.hasAces,
+      aceCount: newAnalysis.aceCount,
       analysis: {
         total: newAnalysis.total,
         canChangeHand: false,
@@ -580,6 +602,177 @@ export const changeHand = (gameId, playerId) => {
       },
     },
     message: `${player.name} cambió su mano. Nueva suma: ${newAnalysis.total}`,
+  };
+};
+
+/**
+ * Permite al jugador colocar su apuesta antes de iniciar la ronda
+ */
+export const placeBet = (gameId, playerId, betAmount) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  // Solo se puede apostar cuando el juego está en WAITING
+  if (game.state !== "WAITING") {
+    throw new Error("Solo puedes apostar antes de iniciar la ronda");
+  }
+
+  const player = game.players.find((p) => p.id === playerId);
+  if (!player) throw new Error("Player not found");
+
+  // Validar apuesta mínima
+  const MIN_BET = 200;
+  if (betAmount < MIN_BET) {
+    throw new Error(`La apuesta mínima es ${MIN_BET} créditos`);
+  }
+
+  // Validar apuesta máxima
+  const MAX_BET = 5000;
+  if (betAmount > MAX_BET) {
+    throw new Error(`La apuesta máxima es ${MAX_BET} créditos`);
+  }
+
+  // Validar que tenga créditos suficientes
+  if (player.credits < betAmount) {
+    throw new Error(
+      `No tienes suficientes créditos. Tienes: ${player.credits}, necesitas: ${betAmount}`
+    );
+  }
+
+  // Deducir la apuesta de los créditos
+  player.credits -= betAmount;
+  player.bet = betAmount;
+
+  console.log(
+    `💰 ${player.name} apostó ${betAmount} créditos. Créditos restantes: ${player.credits}`
+  );
+
+  return {
+    success: true,
+    player: {
+      id: player.id,
+      name: player.name,
+      bet: player.bet,
+      credits: player.credits,
+    },
+    message: `${player.name} apostó ${betAmount} créditos`,
+  };
+};
+
+/**
+ * Obtiene información de las apuestas de todos los jugadores
+ */
+export const getBets = (gameId) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  const betsInfo = game.players.map((p) => ({
+    id: p.id,
+    name: p.name,
+    bet: p.bet,
+    credits: p.credits,
+    isHouse: p.isHouse,
+    hasBet: p.bet > 0,
+  }));
+
+  const totalBets = game.players.reduce((sum, p) => sum + p.bet, 0);
+  const playersWithBets = game.players.filter(
+    (p) => p.bet > 0 && !p.isHouse
+  ).length;
+  const totalPlayers = game.players.filter((p) => !p.isHouse).length;
+
+  return {
+    success: true,
+    gameId: game.id,
+    state: game.state,
+    bets: betsInfo,
+    summary: {
+      totalBets,
+      playersWithBets,
+      totalPlayers,
+      allPlayersReady: playersWithBets === totalPlayers,
+    },
+  };
+};
+export const chooseAceValue = (gameId, playerId, aceIndex, value) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  const player = validatePlayerTurn(game, playerId);
+
+  // Validar que el índice sea válido
+  if (aceIndex < 0 || aceIndex >= player.hand.length) {
+    throw new Error("Índice de carta inválido");
+  }
+
+  // Validar que la carta sea un AS
+  if (player.hand[aceIndex].value !== "A") {
+    throw new Error("La carta seleccionada no es un AS");
+  }
+
+  // Validar que el valor sea 1 u 11
+  if (value !== 1 && value !== 11) {
+    throw new Error("El AS solo puede valer 1 u 11");
+  }
+
+  // REGLA: Si tiene 21 natural (2 cartas iniciales), no puede cambiar el AS
+  const isInitialHand = player.hand.length === 2;
+  const currentAnalysis = analyzeHand(player.hand, player.aceChoices);
+
+  if (isInitialHand && currentAnalysis.is21) {
+    throw new Error(
+      "No puedes cambiar el valor del AS cuando tienes 21 natural"
+    );
+  }
+
+  // Guardar decisión del jugador
+  player.aceChoices[aceIndex] = value;
+
+  // Re-analizar la mano con la nueva decisión
+  const newAnalysis = analyzeHand(player.hand, player.aceChoices);
+  player.handAnalysis = newAnalysis;
+
+  // Si se pasa con la nueva decisión, marcarlo como BUST
+  if (newAnalysis.isBust) {
+    player.status = "BUST";
+    console.log(`💥 ${player.name} se pasó de 21 al cambiar el AS. BUST!`);
+    advanceTurn(game);
+  }
+
+  const totalMultiplier = calculateTotalMultiplier(newAnalysis);
+
+  return {
+    success: true,
+    player: {
+      id: player.id,
+      name: player.name,
+      hand: player.hand,
+      handTotal: newAnalysis.total,
+      status: player.status,
+      aceChoices: player.aceChoices,
+      analysis: {
+        isBust: newAnalysis.isBust,
+        is21: newAnalysis.is21,
+        is20_5: newAnalysis.is20_5,
+        special: newAnalysis.special,
+        hasAces: newAnalysis.hasAces,
+        aceCount: newAnalysis.aceCount,
+        totalMultiplier: totalMultiplier,
+      },
+    },
+    game: {
+      id: game.id,
+      state: game.state,
+      turnIndex: game.turnIndex,
+      currentPlayer:
+        game.state === "PLAYING" && game.turnIndex < game.playOrder.length
+          ? game.players.find((p) => p.id === game.playOrder[game.turnIndex])
+              ?.name
+          : null,
+    },
+    message: newAnalysis.isBust
+      ? `💥 ${player.name} cambió el AS y se pasó de 21 con ${newAnalysis.total}`
+      : `${player.name} cambió el AS a valer ${value}. Nuevo total: ${newAnalysis.total}`,
   };
 };
 
@@ -607,6 +800,13 @@ export const restartGame = (gameId) => {
     }
   }
 
+  // RESETEAR APUESTAS - Todos vuelven a 0 para la nueva ronda
+  game.players.forEach((p) => {
+    p.bet = 0;
+  });
+
+  console.log("💰 Apuestas reseteadas. Los jugadores deben apostar de nuevo.");
+
   game.state = "WAITING";
   return startGame(gameId);
 };
@@ -621,4 +821,7 @@ export default {
   getCurrentTurn,
   changeHand,
   restartGame,
+  chooseAceValue,
+  placeBet,
+  getBets,
 };

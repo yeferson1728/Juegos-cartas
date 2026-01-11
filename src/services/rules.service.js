@@ -1,21 +1,33 @@
 /**
  * Evalúa el valor total de una mano
  * @param {Array} hand - Array de cartas
+ * @param {Object} aceChoices - Objeto con decisiones del jugador {cardIndex: value}
  * @returns {number} - Total de la mano
  */
-export const evaluateHand = (hand) => {
+export const evaluateHand = (hand, aceChoices = {}) => {
   let total = 0;
   let aces = 0;
+  let aceIndices = [];
 
-  for (const card of hand) {
+  for (let i = 0; i < hand.length; i++) {
+    const card = hand[i];
+
     if (card.type === "JOKER") {
       total -= 5;
       continue;
     }
 
     if (card.value === "A") {
-      aces++;
-      total += 11;
+      aceIndices.push(i);
+
+      // Si el jugador ya decidió el valor de este AS
+      if (aceChoices[i] !== undefined) {
+        total += aceChoices[i];
+      } else {
+        // Por defecto, contar como 11
+        aces++;
+        total += 11;
+      }
       continue;
     }
 
@@ -27,7 +39,7 @@ export const evaluateHand = (hand) => {
     total += Number(card.value);
   }
 
-  // Ajustar Ases si se pasa de 21
+  // Ajustar Ases automáticamente solo si no hay decisión del jugador
   while (total > 21 && aces > 0) {
     total -= 10;
     aces--;
@@ -39,12 +51,17 @@ export const evaluateHand = (hand) => {
 /**
  * Analiza una mano completa incluyendo reglas especiales de Relancina
  * @param {Array} hand - Array de cartas
+ * @param {Object} aceChoices - Decisiones del jugador sobre valores de Ases
  * @returns {Object} - Análisis completo de la mano
  */
-export const analyzeHand = (hand) => {
+export const analyzeHand = (hand, aceChoices = {}) => {
   const isInitialHand = hand.length === 2;
   const values = hand.map((c) => c.value);
-  const total = evaluateHand(hand);
+  const total = evaluateHand(hand, aceChoices);
+
+  // Detectar cuántos Ases hay en la mano
+  const aces = hand.filter((c) => c.value === "A");
+  const hasAces = aces.length > 0;
 
   const result = {
     total,
@@ -57,6 +74,11 @@ export const analyzeHand = (hand) => {
     bonusMultiplier: 1,
     special: null,
     cardCountMultiplier: hand.length >= 5 ? hand.length : 1,
+    hasAces: hasAces,
+    aceCount: aces.length,
+    aceIndices: hand
+      .map((c, i) => (c.value === "A" ? i : -1))
+      .filter((i) => i >= 0),
   };
 
   // Solo verificar reglas especiales si es la mano inicial (2 cartas)
@@ -69,7 +91,7 @@ export const analyzeHand = (hand) => {
     result.isDouble2 = true;
     result.special = "DOUBLE_2";
     result.bonusMultiplier = 4;
-    result.canChangeHand = false; // No puede pedir más cartas
+    result.canChangeHand = false;
     return result;
   }
 
@@ -78,7 +100,8 @@ export const analyzeHand = (hand) => {
     result.isDoubleA = true;
     result.special = "DOUBLE_A";
     result.bonusMultiplier = 5;
-    result.canChangeHand = false; // No puede pedir más cartas
+    result.canChangeHand = false;
+    // Para Doble AS, ambos valen 11 automáticamente (suma 22, pero es especial)
     return result;
   }
 
@@ -87,7 +110,7 @@ export const analyzeHand = (hand) => {
     result.is20_5 = true;
     result.special = "TWENTY_POINT_FIVE";
     result.total = 20.5;
-    result.bonusMultiplier = 2; // Multiplica x2 (ajusta según tus reglas)
+    result.bonusMultiplier = 2;
     return result;
   }
 

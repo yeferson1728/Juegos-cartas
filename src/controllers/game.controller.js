@@ -8,6 +8,9 @@ import {
   getCurrentTurn,
   changeHand,
   restartGame,
+  chooseAceValue,
+  placeBet,
+  getBets,
 } from "../services/game.service.js";
 
 /* Crear partida */
@@ -71,7 +74,6 @@ export const getGameController = (req, res) => {
           handCount: p.hand.length,
           status: p.status,
           isHouse: p.isHouse,
-          // Solo mostrar cartas si es necesario
           hand: game.state !== "WAITING" ? p.hand : [],
         })),
       },
@@ -284,6 +286,86 @@ export const restartGameController = (req, res) => {
       success: false,
       error: err.message,
       hint: "Solo puedes reiniciar una partida terminada",
+    });
+  }
+};
+
+/* Elegir valor del AS (1 u 11) */
+export const chooseAceValueController = (req, res) => {
+  try {
+    const { playerId, aceIndex, value } = req.body || {};
+
+    if (!playerId) {
+      return res.status(400).json({
+        success: false,
+        error: "playerId es requerido",
+      });
+    }
+
+    if (aceIndex === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: "aceIndex es requerido (índice de la carta AS en tu mano)",
+      });
+    }
+
+    if (value === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: "value es requerido (1 u 11)",
+      });
+    }
+
+    const result = chooseAceValue(req.params.id, playerId, aceIndex, value);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message,
+      hint: "El AS solo puede valer 1 u 11, y no puedes cambiarlo si tienes 21 natural",
+    });
+  }
+};
+
+/* Colocar apuesta */
+export const placeBetController = (req, res) => {
+  try {
+    const { playerId, amount } = req.body || {};
+
+    if (!playerId) {
+      return res.status(400).json({
+        success: false,
+        error: "playerId es requerido",
+      });
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "amount es requerido y debe ser mayor a 0",
+      });
+    }
+
+    const result = placeBet(req.params.id, playerId, amount);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message,
+      hint: "Apuesta mínima: 200 créditos, máxima: 5,000 créditos",
+    });
+  }
+};
+
+/* Ver apuestas de todos los jugadores */
+export const getBetsController = (req, res) => {
+  try {
+    const result = getBets(req.params.id);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message,
     });
   }
 };

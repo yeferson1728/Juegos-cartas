@@ -9,6 +9,9 @@ import {
   listGamesController,
   changeHandController,
   restartGameController,
+  chooseAceValueController,
+  placeBetController,
+  getBetsController,
 } from "../controllers/game.controller.js";
 
 const router = Router();
@@ -21,6 +24,12 @@ router.post("/create", createGameController);
 
 // Obtener información de una partida
 router.get("/:id", getGameController);
+
+// Colocar apuesta
+router.post("/:id/bet", placeBetController);
+
+// Ver apuestas
+router.get("/:id/bets", getBetsController);
 
 // Iniciar partida
 router.post("/:id/start", startGameController);
@@ -39,5 +48,8 @@ router.post("/:id/stand", standController);
 
 // Cambiar mano (cuando suma 12)
 router.post("/:id/change-hand", changeHandController);
+
+// Elegir valor del AS (1 u 11)
+router.post("/:id/choose-ace", chooseAceValueController);
 
 export default router;
