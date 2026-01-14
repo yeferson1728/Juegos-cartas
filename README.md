@@ -1,223 +1,199 @@
-🃏 RELANCINA
+# 🃏 RELANCINA - Backend API
 
-Relancina es un juego de cartas inspirado en el 21, con reglas propias, multiplicadores, jokers negativos y un sistema de créditos virtuales.
-El juego está diseñado para partidas privadas de hasta 5 jugadores, con una figura central llamada la Casa, que juega contra todos los demás.
+> Backend completo para el juego de cartas Relancina - Inspirado en el 21 con reglas especiales y multiplicadores.
 
-📦 Baraja
+---
 
-Baraja estándar de 52 cartas
+## 🚀 Instalación Rápida
 
-- 4 Jokers
+```bash
+npm install
+npm start
+# Servidor en http://localhost:3000
+```
 
-Total: 56 cartas
+---
 
-👥 Jugadores
+## 🎮 ¿Qué es Relancina?
 
-Mínimo recomendado: 2
+Juego de cartas para **3-5 jugadores** que compiten contra **la Casa**. Objetivo: llegar a **21 puntos** sin pasarse.
 
-Máximo: 5
+### Características
 
-Cada jugador inicia con 10.000 créditos virtuales
+- 🃏 56 cartas (52 normales + 4 Jokers)
+- 💰 Apuestas: 200 - 5,000 créditos
+- ⭐ Manos especiales con multiplicadores
+- 🏠 La Casa juega al final
 
-Cuando un jugador pierde todos sus créditos:
+---
 
-Queda eliminado
+## 📜 Reglas Básicas
 
-Puede seguir observando la partida
+### Valores de Cartas
 
-🏠 La Casa
-Elección inicial de la Casa
+| Carta   | Valor                     |
+| ------- | ------------------------- |
+| A       | 1 o 11 (elige el jugador) |
+| 2-10    | Valor numérico            |
+| J, Q, K | 10                        |
+| Joker   | -5                        |
 
-Cada jugador saca 1 carta.
+### Manos Especiales (solo 2 primeras cartas)
 
-El jugador con la carta más alta es la Casa.
+- **Doble 2:** x4 multiplicador
+- **Doble As:** x5 multiplicador
+- **20.5:** Suma de 14 = 20.5 (x2)
+- **Suma 12:** Puede cambiar mano completa
 
-Si hay empate, se repite la ronda entre los empatados.
+### Multiplicadores
 
-La Casa inicial reparte las cartas.
+- Por mano especial: x2, x4, x5
+- Por cantidad cartas: 5 cartas = x5, 6 = x6, etc.
+- **Total = Especial × Cartas**
 
-🎯 Objetivo del juego
+### La Casa
 
-Llegar lo más cerca posible a 21 sin pasarse.
+- Juega después de todos
+- Sin mínimo de 17 (se planta cuando quiera)
+- 21 Casa solo pierde vs Doble 2 o Doble As
+- Si alguien saca 21 inicial → Nueva Casa
 
-La Casa compite contra todos los jugadores, no entre jugadores.
+### Desconexión
 
-🃏 Valores de las cartas
-Carta Valor
-A (As) 1 o 11 (a elección del jugador)
-2 – 10 Valor numérico
-J, Q, K 10
-Joker -5 puntos
-Casos especiales
+- Jugador desconectado → Pierde apuesta
+- Casa desconectada → Todos recuperan apuestas
+- < 2 jugadores → Partida termina
 
-2 Jokers = -10 puntos
+---
 
-Todas las cartas valen igual sin importar el palo.
+## 📡 API Endpoints
 
-🎴 Inicio de cada ronda
+**Base URL:** `http://localhost:3000/api/game`
 
-Cada jugador recibe 2 cartas:
+### Gestión
 
-1 carta boca arriba
+```bash
+POST   /create              # Crear partida (3-5 jugadores)
+GET    /{id}                # Ver partida
+GET    /{id}/turn           # Ver turno actual
+POST   /{id}/start          # Iniciar
+POST   /{id}/restart        # Nueva ronda
+```
 
-1 carta boca abajo
+### Apuestas
 
-Los jugadores sí pueden ver todas sus cartas, incluso la que está boca abajo.
+```bash
+POST   /{id}/bet            # Apostar (200-5,000)
+GET    /{id}/bets           # Ver apuestas
+```
 
-Las cartas adicionales siempre se reparten boca arriba.
+### Jugadores
 
-💰 Apuestas
+```bash
+POST   /{id}/hit            # Pedir carta
+POST   /{id}/stand          # Plantarse
+POST   /{id}/choose-ace     # Cambiar AS (1 u 11)
+POST   /{id}/change-hand    # Cambiar mano (suma 12)
+POST   /{id}/disconnect     # Desconectar
+```
 
-Apuesta mínima: 200 créditos
+### Casa
 
-Apuesta máxima: 5.000 créditos
-
-Todas las apuestas son créditos virtuales
-
-⭐ Manos especiales (solo con las 2 primeras cartas)
-
-Estas reglas solo aplican si ocurren con las 2 cartas iniciales.
-
-🔥 Doble 2
-
-Dos cartas con valor 2
-
-Gana x4 la apuesta
-
-Las cartas quedan visibles
-
-No puede pedir más cartas
-
-🔥 Doble As
-
-Dos A
-
-Gana x5 la apuesta
-
-Las cartas quedan visibles
-
-No puede pedir más cartas
-
-🔥 20.5 (Ventaja especial)
-
-Si la suma inicial es 14, sin importar las cartas
-
-Se considera 20.5
-
-Gana contra cualquier 20
-
-No aplica si el jugador cambió la mano
-
-🔁 Cambio de mano (12 inicial)
-
-Si el jugador obtiene 12 con las 2 primeras cartas
-
-Puede pedir cambio completo de mano
-
-Recibe otras 2 cartas
-
-Al cambiar la mano pierde derecho a:
-
-Doble 2
-
-Doble As
-
-20.5
-
-🔄 Turnos y decisiones
-
-El turno avanza en sentido de la mano derecha
-
-En su turno, el jugador puede:
-
-Pedir otra carta
-
-Quedarse con su mano
-
-Tiempo máximo por decisión: 30 segundos
-
-Si no decide, se queda con su mano actual
-
-📈 Multiplicador por número de cartas
-
-A partir de la quinta carta, se activa un multiplicador:
-
-5 cartas → x5
-
-6 cartas → x6
-
-Y así sucesivamente
-
-El multiplicador aplica tanto para ganar como para perder
-
-❌ Pasarse
-
-Si un jugador supera 21, pierde automáticamente su apuesta.
-
-🏠 Reglas especiales de la Casa
-La Casa con 21
-
-Si la Casa obtiene 21:
-
-Solo puede perder contra jugadores que hayan sacado:
-
-Doble 2
-
-Doble As
-
-Si la Casa también tiene doble 2 o doble As:
-
-Gana el bonus correspondiente
-
-Comparación Casa vs jugadores
-
-La Casa se compara individualmente contra cada jugador:
-
-Gana a quienes tengan igual o menor puntaje
-
-Pierde contra quienes tengan mayor puntaje
-
-Si la Casa se pasa de 21:
-
-Pierde contra todos
-
-🔄 Cambio de Casa durante la partida
-
-Si un jugador obtiene 21, se revela primero y se convierte en la nueva Casa.
-
-En caso de varios jugadores con 21:
-
-Contando desde la mano derecha de la Casa actual,
-el jugador más cercano será la nueva Casa.
-
-Si la Casa también tiene 21:
-
-Sigue siendo la Casa.
-
-🛑 Fin de la partida
-
-La partida termina cuando:
-
-Un jugador gana todos los créditos de los demás
-
-O se realiza una votación:
-
-Si más de la mitad acepta, la partida finaliza
-
-👀 Modo espectador
-
-Jugadores eliminados pueden quedarse observando la partida
-
-No pueden interactuar ni apostar
-
-🧠 Notas de diseño
-
-El servidor controla:
-
-Reparto de cartas
-
-Validación de reglas
-
-Créditos y multiplicadores
-
-El cliente solo muestra información autorizada
+```bash
+POST   /{id}/house/hit      # Casa pide carta
+POST   /{id}/house/stand    # Casa se planta
+```
+
+---
+
+## 🎯 Flujo de Juego
+
+```
+1. POST /create → Crear partida
+2. POST /bet (todos) → Apostar 200-5,000
+3. POST /start → Iniciar (reparte cartas)
+4. Loop: POST /hit o /stand → Jugadores juegan
+5. Estado HOUSE_TURN → Casa juega
+6. POST /house/stand → Resuelve ganadores
+7. POST /restart → Nueva ronda
+```
+
+---
+
+## 💡 Ejemplo de Uso
+
+```javascript
+// 1. Crear
+const res = await fetch("/api/game/create", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    players: [{ name: "Casa" }, { name: "Alice" }, { name: "Bob" }],
+  }),
+});
+const { game } = await res.json();
+
+// 2. Apostar
+await fetch(`/api/game/${game.id}/bet`, {
+  method: "POST",
+  body: JSON.stringify({ playerId: aliceId, amount: 500 }),
+});
+
+// 3. Iniciar
+await fetch(`/api/game/${game.id}/start`, { method: "POST" });
+
+// 4. Jugar
+await fetch(`/api/game/${game.id}/hit`, {
+  method: "POST",
+  body: JSON.stringify({ playerId: aliceId }),
+});
+```
+
+---
+
+## 📊 Estados del Juego
+
+| Estado     | Descripción        | Acciones                     |
+| ---------- | ------------------ | ---------------------------- |
+| WAITING    | Esperando apuestas | `/bet`                       |
+| PLAYING    | Turnos jugadores   | `/hit`, `/stand`             |
+| HOUSE_TURN | Turno Casa         | `/house/hit`, `/house/stand` |
+| FINISHED   | Terminada          | `/restart`                   |
+
+---
+
+## 📁 Estructura
+
+```
+src/
+├── controllers/    # Endpoints
+├── services/       # Lógica del juego
+├── routes/         # Rutas API
+├── models/         # Modelos de datos
+└── server.js       # Entrada
+```
+
+---
+
+## ✅ Features Completas
+
+- ✅ 3-5 jugadores con Casa
+- ✅ Apuestas (200-5,000)
+- ✅ Manos especiales (Doble 2, As, 20.5)
+- ✅ Multiplicadores por cartas
+- ✅ AS ajustable (1 u 11)
+- ✅ Cambio de mano (suma 12)
+- ✅ Casa sin mínimo
+- ✅ Resolución automática
+- ✅ Sistema desconexión
+- ✅ Reciclaje de cartas
+
+---
+
+## 🎉 ¡Listo para Usar!
+
+Backend 100% funcional. Conecta tu frontend y a jugar. 🃏💰
+
+---
+
+**Documentación completa:** Ver código fuente para detalles de cada endpoint.

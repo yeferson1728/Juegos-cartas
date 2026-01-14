@@ -123,6 +123,29 @@ const advanceTurn = (game) => {
   // Avanzar al siguiente índice en playOrder
   game.turnIndex++;
 
+  // Buscar el siguiente jugador activo (skip desconectados)
+  while (game.turnIndex < game.playOrder.length) {
+    const nextPlayerId = game.playOrder[game.turnIndex];
+    const nextPlayer = game.players.find((p) => p.id === nextPlayerId);
+
+    // Si el jugador está activo y conectado, es su turno
+    if (
+      nextPlayer &&
+      nextPlayer.status === "ACTIVE" &&
+      nextPlayer.isConnected
+    ) {
+      console.log(
+        `➡️  Turno avanzado a: ${nextPlayer.name} (${game.turnIndex + 1}/${
+          game.playOrder.length
+        })`
+      );
+      return;
+    }
+
+    // Si está desconectado o no activo, saltar al siguiente
+    game.turnIndex++;
+  }
+
   // Si llegamos al final del playOrder, todos terminaron
   if (game.turnIndex >= game.playOrder.length) {
     // Descartar todas las cartas de los jugadores
@@ -136,20 +159,16 @@ const advanceTurn = (game) => {
       `♻️ Fin de ronda. ${game.discardPile.length} cartas descartadas en total.`
     );
 
-    game.state = "FINISHED";
-    console.log("🏁 Todos los jugadores terminaron.");
-    console.log("🎮 La partida terminó. Puedes iniciar una nueva ronda.");
+    // Verificar si hay suficientes jugadores
+    if (!checkMinimumPlayers(game)) {
+      return;
+    }
+
+    // Cambiar a turno de la Casa
+    game.state = "HOUSE_TURN";
+    console.log("🏠 Todos los jugadores terminaron. Turno de la Casa.");
     return;
   }
-
-  const nextPlayerId = game.playOrder[game.turnIndex];
-  const nextPlayer = game.players.find((p) => p.id === nextPlayerId);
-
-  console.log(
-    `➡️  Turno avanzado a: ${nextPlayer.name} (${game.turnIndex + 1}/${
-      game.playOrder.length
-    })`
-  );
 };
 
 /* ========================================
@@ -182,6 +201,7 @@ export const createGame = ({ players = [] } = {}) => {
     handAnalysis: null,
     hasChangedHand: false,
     aceChoices: {}, // Decisiones del jugador sobre el valor de los Ases
+    isConnected: true, // Estado de conexión
   }));
 
   const game = {
@@ -329,6 +349,22 @@ export const getCurrentTurn = (gameId) => {
       state: game.state,
       message: "La partida ha terminado",
       currentPlayer: null,
+    };
+  }
+
+  if (game.state === "HOUSE_TURN") {
+    const house = game.players.find((p) => p.isHouse);
+    return {
+      gameId: game.id,
+      state: game.state,
+      currentPlayer: {
+        id: house.id,
+        name: house.name,
+        isHouse: true,
+        handCount: house.hand.length,
+        handTotal: house.handAnalysis?.total,
+      },
+      message: "🏠 Turno de la Casa",
     };
   }
 
@@ -488,6 +524,26 @@ export const stand = (gameId, playerId) => {
 
   // AVANZAR TURNO
   advanceTurn(game);
+
+  // Verificar si hay suficientes jugadores
+  if (!checkMinimumPlayers(game)) {
+    return {
+      success: true,
+      player: {
+        id: player.id,
+        name: player.name,
+        hand: player.hand,
+        handTotal: analysis.total,
+        status: player.status,
+      },
+      game: {
+        id: game.id,
+        state: game.state,
+      },
+      message: `${player.name} se plantó. Quedan menos de 2 jugadores. Partida terminada.`,
+      gameEnded: true,
+    };
+  }
 
   const totalMultiplier = calculateTotalMultiplier(analysis);
 
@@ -777,8 +833,598 @@ export const chooseAceValue = (gameId, playerId, aceIndex, value) => {
 };
 
 /**
- * Reinicia la partida manteniendo la misma Casa
+ * La Casa pide una carta
  */
+export const houseHit = (gameId) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  // Validar que sea turno de la Casa
+  if (game.state !== "HOUSE_TURN") {
+    throw new Error("No es turno de la Casa");
+  }
+
+  const house = game.players.find((p) => p.isHouse);
+  if (!house) throw new Error("No hay Casa en esta partida");
+
+  const card = drawCardSafe(game);
+  if (card) house.hand.push(card);
+
+  const analysis = analyzeHand(house.hand, house.aceChoices);
+  house.handAnalysis = analysis;
+
+  console.log(
+    `🏠 Casa pidió carta: ${card.value}${card.suit || ""}. Total: ${
+      analysis.total
+    }`
+  );
+
+  // Si la Casa se pasa, termina automáticamente
+  if (analysis.isBust) {
+    house.status = "BUST";
+    game.state = "FINISHED";
+    console.log(
+      `💥 Casa se pasó de 21 con ${analysis.total}. ¡Todos los jugadores ganan!`
+    );
+
+    // RESOLVER GANADORES AUTOMÁTICAMENTE
+    const resolution = resolveWinners(game.id);
+
+    const totalMultiplier = calculateTotalMultiplier(analysis);
+
+    return {
+      success: true,
+      house: {
+        name: house.name,
+        hand: house.hand,
+        handTotal: analysis.total,
+        status: house.status,
+        analysis: {
+          isBust: analysis.isBust,
+          is21: analysis.is21,
+          is20_5: analysis.is20_5,
+          special: analysis.special,
+          totalMultiplier: totalMultiplier,
+        },
+      },
+      card: card,
+      game: {
+        id: game.id,
+        state: game.state,
+      },
+      resolution: resolution, // Incluir resolución
+      message: `💥 Casa se pasó de 21 con ${analysis.total}. ¡Todos ganan!`,
+    };
+  }
+
+  const totalMultiplier = calculateTotalMultiplier(analysis);
+
+  return {
+    success: true,
+    house: {
+      name: house.name,
+      hand: house.hand,
+      handTotal: analysis.total,
+      status: house.status,
+      analysis: {
+        isBust: analysis.isBust,
+        is21: analysis.is21,
+        is20_5: analysis.is20_5,
+        special: analysis.special,
+        totalMultiplier: totalMultiplier,
+      },
+    },
+    card: card,
+    game: {
+      id: game.id,
+      state: game.state,
+    },
+    message: analysis.isBust
+      ? `💥 Casa se pasó de 21 con ${analysis.total}`
+      : `🏠 Casa sacó ${card.value}${card.suit || ""}. Total: ${
+          analysis.total
+        }`,
+  };
+};
+
+/**
+ * La Casa se planta
+ */
+export const houseStand = (gameId) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  // Validar que sea turno de la Casa
+  if (game.state !== "HOUSE_TURN") {
+    throw new Error("No es turno de la Casa");
+  }
+
+  const house = game.players.find((p) => p.isHouse);
+  if (!house) throw new Error("No hay Casa en esta partida");
+
+  const analysis = analyzeHand(house.hand, house.aceChoices);
+  house.handAnalysis = analysis;
+  house.status = "STAND";
+
+  // Cambiar estado a FINISHED para resolver ganadores
+  game.state = "FINISHED";
+
+  console.log(`🏠 Casa se plantó con ${analysis.total}`);
+
+  // RESOLVER GANADORES AUTOMÁTICAMENTE
+  const resolution = resolveWinners(game.id);
+
+  const totalMultiplier = calculateTotalMultiplier(analysis);
+
+  return {
+    success: true,
+    house: {
+      name: house.name,
+      hand: house.hand,
+      handTotal: analysis.total,
+      status: house.status,
+      analysis: {
+        is21: analysis.is21,
+        is20_5: analysis.is20_5,
+        special: analysis.special,
+        totalMultiplier: totalMultiplier,
+      },
+    },
+    game: {
+      id: game.id,
+      state: game.state,
+    },
+    resolution: resolution, // Incluir resolución en la respuesta
+    message: `🏠 Casa se plantó con ${analysis.total}. Ganadores resueltos.`,
+  };
+};
+
+/**
+ * Marca a un jugador como desconectado y pierde su apuesta
+ */
+export const disconnectPlayer = (gameId, playerId) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  const player = game.players.find((p) => p.id === playerId);
+  if (!player) throw new Error("Player not found");
+
+  // Marcar como desconectado
+  player.status = "DISCONNECTED";
+  player.isConnected = false;
+
+  console.log(
+    `🔌 ${player.name} se desconectó. Pierde su apuesta de ${player.bet} créditos.`
+  );
+
+  // Si es la Casa quien se desconecta, terminar partida inmediatamente
+  if (player.isHouse) {
+    game.state = "FINISHED";
+
+    // Todos los jugadores recuperan sus apuestas
+    game.players.forEach((p) => {
+      if (!p.isHouse && p.bet > 0) {
+        p.credits += p.bet;
+        console.log(
+          `💰 ${p.name} recupera su apuesta de ${p.bet} créditos por desconexión de la Casa.`
+        );
+      }
+    });
+
+    return {
+      success: true,
+      message:
+        "La Casa se desconectó. Partida terminada. Todos los jugadores recuperan sus apuestas.",
+      player: {
+        name: player.name,
+        isHouse: true,
+      },
+      game: {
+        id: game.id,
+        state: game.state,
+      },
+      allPlayersRefunded: true,
+    };
+  }
+
+  // Si es un jugador normal, la apuesta ya se perdió al colocarla
+  // Solo verificamos si la partida debe terminar por falta de jugadores
+
+  const activePlayers = game.players.filter(
+    (p) => !p.isHouse && p.status !== "DISCONNECTED" && p.status !== "SPECTATOR"
+  );
+
+  // Si quedan menos de 2 jugadores activos (sin contar Casa), terminar partida
+  if (activePlayers.length < 2) {
+    game.state = "FINISHED";
+
+    console.log(`⚠️ Quedan menos de 2 jugadores activos. Partida terminada.`);
+
+    // Devolver apuestas a los jugadores restantes
+    activePlayers.forEach((p) => {
+      if (p.bet > 0) {
+        p.credits += p.bet;
+        console.log(`💰 ${p.name} recupera su apuesta de ${p.bet} créditos.`);
+      }
+    });
+
+    return {
+      success: true,
+      message: `${player.name} se desconectó. Quedan menos de 2 jugadores. Partida terminada.`,
+      player: {
+        name: player.name,
+        bet: player.bet,
+        isHouse: false,
+      },
+      game: {
+        id: game.id,
+        state: game.state,
+      },
+      remainingPlayers: activePlayers.length,
+      gameEnded: true,
+    };
+  }
+
+  // Si la partida sigue, avanzar turno si es necesario
+  if (game.state === "PLAYING") {
+    const currentPlayerId = game.playOrder[game.turnIndex];
+    if (currentPlayerId === playerId) {
+      console.log(`➡️ Jugador desconectado estaba en turno. Avanzando...`);
+      advanceTurn(game);
+    }
+  }
+
+  return {
+    success: true,
+    message: `${player.name} se desconectó y perdió su apuesta de ${player.bet} créditos.`,
+    player: {
+      name: player.name,
+      bet: player.bet,
+      isHouse: false,
+    },
+    game: {
+      id: game.id,
+      state: game.state,
+      remainingPlayers: activePlayers.length,
+    },
+    gameEnded: false,
+  };
+};
+
+/**
+ * Verifica si hay suficientes jugadores para continuar
+ */
+const checkMinimumPlayers = (game) => {
+  const activePlayers = game.players.filter(
+    (p) => !p.isHouse && p.status !== "DISCONNECTED" && p.status !== "SPECTATOR"
+  );
+
+  if (activePlayers.length < 2) {
+    game.state = "FINISHED";
+    console.log(
+      `⚠️ Quedan solo ${activePlayers.length} jugador(es). Partida terminada automáticamente.`
+    );
+
+    // Devolver apuestas a jugadores restantes
+    activePlayers.forEach((p) => {
+      if (p.bet > 0 && p.status !== "BUST") {
+        p.credits += p.bet;
+        console.log(`💰 ${p.name} recupera su apuesta de ${p.bet} créditos.`);
+      }
+    });
+
+    return false; // No hay suficientes jugadores
+  }
+
+  return true; // Hay suficientes jugadores
+};
+export const resolveWinners = (gameId) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  // Solo se puede resolver cuando está FINISHED
+  if (game.state !== "FINISHED") {
+    throw new Error(
+      "Solo se pueden resolver ganadores cuando la partida está FINISHED"
+    );
+  }
+
+  const house = game.players.find((p) => p.isHouse);
+  if (!house) throw new Error("No hay Casa en esta partida");
+
+  const houseAnalysis =
+    house.handAnalysis || analyzeHand(house.hand, house.aceChoices);
+
+  const results = [];
+  let houseTotalWinnings = 0;
+
+  // Procesar cada jugador (excepto la Casa)
+  game.players.forEach((player) => {
+    if (player.isHouse) return; // Skip Casa
+
+    const playerAnalysis =
+      player.handAnalysis || analyzeHand(player.hand, player.aceChoices);
+
+    let result = {
+      playerId: player.id,
+      playerName: player.name,
+      bet: player.bet,
+      playerTotal: playerAnalysis.total,
+      houseTotal: houseAnalysis.total,
+      playerStatus: player.status,
+      houseStatus: house.status,
+      outcome: null, // WIN, LOSE, TIE
+      multiplier: 1,
+      winnings: 0,
+      creditsChange: 0,
+      previousCredits: player.credits,
+      newCredits: player.credits,
+    };
+
+    // Si el jugador se pasó, pierde automáticamente
+    if (player.status === "BUST") {
+      result.outcome = "LOSE";
+      result.creditsChange = 0; // Ya perdió la apuesta al colocarla
+      result.newCredits = player.credits;
+      houseTotalWinnings += player.bet;
+      results.push(result);
+      return;
+    }
+
+    // Si la Casa se pasó, todos los que no se pasaron ganan
+    if (house.status === "BUST") {
+      result.outcome = "WIN";
+      result.multiplier = calculateTotalMultiplier(playerAnalysis);
+      result.winnings = player.bet * result.multiplier;
+      result.creditsChange = result.winnings;
+      result.newCredits = player.credits + result.winnings;
+      player.credits = result.newCredits;
+      houseTotalWinnings -= result.winnings;
+      results.push(result);
+      return;
+    }
+
+    // Reglas especiales de manos
+    // Doble As (x5) o Doble 2 (x4) siempre ganan (excepto vs otra mano especial igual o mejor)
+    if (playerAnalysis.isDoubleA) {
+      if (houseAnalysis.isDoubleA) {
+        // Empate entre Doble As
+        result.outcome = "TIE";
+        result.creditsChange = player.bet; // Recupera su apuesta
+        result.newCredits = player.credits + player.bet;
+        player.credits = result.newCredits;
+      } else {
+        // Jugador gana con Doble As
+        result.outcome = "WIN";
+        result.multiplier = 5;
+        result.winnings = player.bet * result.multiplier;
+        result.creditsChange = result.winnings;
+        result.newCredits = player.credits + result.winnings;
+        player.credits = result.newCredits;
+        houseTotalWinnings -= result.winnings;
+      }
+      results.push(result);
+      return;
+    }
+
+    if (playerAnalysis.isDouble2) {
+      if (houseAnalysis.isDoubleA) {
+        // Casa con Doble As gana vs Doble 2
+        result.outcome = "LOSE";
+        result.creditsChange = 0;
+        result.newCredits = player.credits;
+        houseTotalWinnings += player.bet;
+      } else if (houseAnalysis.isDouble2) {
+        // Empate
+        result.outcome = "TIE";
+        result.creditsChange = player.bet;
+        result.newCredits = player.credits + player.bet;
+        player.credits = result.newCredits;
+      } else {
+        // Jugador gana con Doble 2
+        result.outcome = "WIN";
+        result.multiplier = 4;
+        result.winnings = player.bet * result.multiplier;
+        result.creditsChange = result.winnings;
+        result.newCredits = player.credits + result.winnings;
+        player.credits = result.newCredits;
+        houseTotalWinnings -= result.winnings;
+      }
+      results.push(result);
+      return;
+    }
+
+    // Si Casa tiene Doble As o Doble 2, solo pierde vs igual o mejor
+    if (houseAnalysis.isDoubleA) {
+      result.outcome = "LOSE";
+      result.creditsChange = 0;
+      result.newCredits = player.credits;
+      houseTotalWinnings += player.bet;
+      results.push(result);
+      return;
+    }
+
+    if (houseAnalysis.isDouble2) {
+      result.outcome = "LOSE";
+      result.creditsChange = 0;
+      result.newCredits = player.credits;
+      houseTotalWinnings += player.bet;
+      results.push(result);
+      return;
+    }
+
+    // 20.5 gana contra cualquier 20 o menos
+    if (playerAnalysis.is20_5) {
+      if (houseAnalysis.is20_5) {
+        // Empate
+        result.outcome = "TIE";
+        result.creditsChange = player.bet;
+        result.newCredits = player.credits + player.bet;
+        player.credits = result.newCredits;
+      } else if (houseAnalysis.total <= 20) {
+        // Jugador gana
+        result.outcome = "WIN";
+        result.multiplier = calculateTotalMultiplier(playerAnalysis);
+        result.winnings = player.bet * result.multiplier;
+        result.creditsChange = result.winnings;
+        result.newCredits = player.credits + result.winnings;
+        player.credits = result.newCredits;
+        houseTotalWinnings -= result.winnings;
+      } else {
+        // Casa tiene 21
+        result.outcome = "LOSE";
+        result.creditsChange = 0;
+        result.newCredits = player.credits;
+        houseTotalWinnings += player.bet;
+      }
+      results.push(result);
+      return;
+    }
+
+    if (houseAnalysis.is20_5 && playerAnalysis.total <= 20) {
+      result.outcome = "LOSE";
+      result.creditsChange = 0;
+      result.newCredits = player.credits;
+      houseTotalWinnings += player.bet;
+      results.push(result);
+      return;
+    }
+
+    // Comparación normal de puntajes
+    if (playerAnalysis.total > houseAnalysis.total) {
+      // Jugador gana
+      result.outcome = "WIN";
+      result.multiplier = calculateTotalMultiplier(playerAnalysis);
+      result.winnings = player.bet * result.multiplier;
+      result.creditsChange = result.winnings;
+      result.newCredits = player.credits + result.winnings;
+      player.credits = result.newCredits;
+      houseTotalWinnings -= result.winnings;
+    } else if (playerAnalysis.total < houseAnalysis.total) {
+      // Casa gana
+      result.outcome = "LOSE";
+      result.creditsChange = 0;
+      result.newCredits = player.credits;
+      houseTotalWinnings += player.bet;
+    } else {
+      // Empate - Devolver apuesta
+      result.outcome = "TIE";
+      result.creditsChange = player.bet;
+      result.newCredits = player.credits + player.bet;
+      player.credits = result.newCredits;
+    }
+
+    results.push(result);
+  });
+
+  // Actualizar créditos de la Casa
+  const housePreviousCredits = house.credits;
+  house.credits += houseTotalWinnings;
+
+  console.log(
+    `💰 Resolución completada. Casa ${
+      houseTotalWinnings >= 0 ? "ganó" : "perdió"
+    } ${Math.abs(houseTotalWinnings)} créditos`
+  );
+
+  // Eliminar jugadores sin créditos
+  const eliminatedPlayers = [];
+  game.players.forEach((player) => {
+    if (!player.isHouse && player.credits <= 0) {
+      player.status = "SPECTATOR";
+      eliminatedPlayers.push({
+        id: player.id,
+        name: player.name,
+      });
+      console.log(`⛔ ${player.name} eliminado (sin créditos)`);
+    }
+  });
+
+  return {
+    success: true,
+    gameId: game.id,
+    house: {
+      name: house.name,
+      hand: house.hand,
+      total: houseAnalysis.total,
+      status: house.status,
+      special: houseAnalysis.special,
+      previousCredits: housePreviousCredits,
+      newCredits: house.credits,
+      totalWinnings: houseTotalWinnings,
+    },
+    results: results,
+    summary: {
+      totalPlayers: results.length,
+      winners: results.filter((r) => r.outcome === "WIN").length,
+      losers: results.filter((r) => r.outcome === "LOSE").length,
+      ties: results.filter((r) => r.outcome === "TIE").length,
+      houseNetWinnings: houseTotalWinnings,
+    },
+    eliminatedPlayers: eliminatedPlayers,
+    message:
+      eliminatedPlayers.length > 0
+        ? `Partida resuelta. ${eliminatedPlayers.length} jugador(es) eliminado(s)`
+        : "Partida resuelta exitosamente",
+  };
+};
+export const houseChooseAce = (gameId, aceIndex, value) => {
+  const game = games.get(gameId);
+  if (!game) throw new Error("Game not found");
+
+  if (game.state !== "HOUSE_TURN") {
+    throw new Error("No es turno de la Casa");
+  }
+
+  const house = game.players.find((p) => p.isHouse);
+  if (!house) throw new Error("No hay Casa en esta partida");
+
+  // Validar que el índice sea válido
+  if (aceIndex < 0 || aceIndex >= house.hand.length) {
+    throw new Error("Índice de carta inválido");
+  }
+
+  // Validar que la carta sea un AS
+  if (house.hand[aceIndex].value !== "A") {
+    throw new Error("La carta seleccionada no es un AS");
+  }
+
+  // Validar que el valor sea 1 u 11
+  if (value !== 1 && value !== 11) {
+    throw new Error("El AS solo puede valer 1 u 11");
+  }
+
+  // Guardar decisión
+  house.aceChoices[aceIndex] = value;
+
+  // Re-analizar la mano
+  const newAnalysis = analyzeHand(house.hand, house.aceChoices);
+  house.handAnalysis = newAnalysis;
+
+  // Si se pasa, terminar
+  if (newAnalysis.isBust) {
+    house.status = "BUST";
+    game.state = "FINISHED";
+    console.log(`💥 Casa se pasó de 21 al cambiar el AS. BUST!`);
+  }
+
+  return {
+    success: true,
+    house: {
+      name: house.name,
+      hand: house.hand,
+      handTotal: newAnalysis.total,
+      status: house.status,
+      aceChoices: house.aceChoices,
+    },
+    game: {
+      state: game.state,
+    },
+    message: newAnalysis.isBust
+      ? `💥 Casa cambió el AS y se pasó de 21 con ${newAnalysis.total}`
+      : `🏠 Casa cambió el AS a valer ${value}. Nuevo total: ${newAnalysis.total}`,
+  };
+};
 export const restartGame = (gameId) => {
   const game = games.get(gameId);
   if (!game) throw new Error("Game not found");
@@ -824,4 +1470,9 @@ export default {
   chooseAceValue,
   placeBet,
   getBets,
+  houseHit,
+  houseStand,
+  houseChooseAce,
+  resolveWinners,
+  disconnectPlayer,
 };

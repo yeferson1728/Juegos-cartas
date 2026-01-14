@@ -11,6 +11,11 @@ import {
   chooseAceValue,
   placeBet,
   getBets,
+  houseHit,
+  houseStand,
+  houseChooseAce,
+  resolveWinners,
+  disconnectPlayer,
 } from "../services/game.service.js";
 
 /* Crear partida */
@@ -366,6 +371,100 @@ export const getBetsController = (req, res) => {
     return res.status(500).json({
       success: false,
       error: err.message,
+    });
+  }
+};
+
+/* Casa pide carta */
+export const houseHitController = (req, res) => {
+  try {
+    const result = houseHit(req.params.id);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message,
+      hint: "Solo puede usarse cuando es turno de la Casa (estado HOUSE_TURN)",
+    });
+  }
+};
+
+/* Casa se planta */
+export const houseStandController = (req, res) => {
+  try {
+    const result = houseStand(req.params.id);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message,
+      hint: "Solo puede usarse cuando es turno de la Casa (estado HOUSE_TURN)",
+    });
+  }
+};
+
+/* Casa elige valor del AS */
+export const houseChooseAceController = (req, res) => {
+  try {
+    const { aceIndex, value } = req.body || {};
+
+    if (aceIndex === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: "aceIndex es requerido",
+      });
+    }
+
+    if (value === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: "value es requerido (1 u 11)",
+      });
+    }
+
+    const result = houseChooseAce(req.params.id, aceIndex, value);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message,
+      hint: "El AS solo puede valer 1 u 11",
+    });
+  }
+};
+
+/* Resolver ganadores manualmente */
+export const resolveWinnersController = (req, res) => {
+  try {
+    const result = resolveWinners(req.params.id);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message,
+      hint: "Solo se pueden resolver ganadores cuando la partida está FINISHED",
+    });
+  }
+};
+/* Desconectar jugador */
+export const disconnectPlayerController = (req, res) => {
+  try {
+    const { playerId } = req.body || {};
+    
+    if (!playerId) {
+      return res.status(400).json({ 
+        success: false,
+        error: "playerId es requerido" 
+      });
+    }
+    
+    const result = disconnectPlayer(req.params.id, playerId);
+    return res.json(result);
+    
+  } catch (err) {
+    return res.status(400).json({ 
+      success: false,
+      error: err.message
     });
   }
 };

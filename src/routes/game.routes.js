@@ -12,6 +12,11 @@ import {
   chooseAceValueController,
   placeBetController,
   getBetsController,
+  houseHitController,
+  houseStandController,
+  houseChooseAceController,
+  resolveWinnersController,
+  disconnectPlayerController,
 } from "../controllers/game.controller.js";
 
 const router = Router();
@@ -51,5 +56,24 @@ router.post("/:id/change-hand", changeHandController);
 
 // Elegir valor del AS (1 u 11)
 router.post("/:id/choose-ace", chooseAceValueController);
+
+// Desconectar jugador
+router.post("/:id/disconnect", disconnectPlayerController);
+
+// === ENDPOINTS DE LA CASA ===
+
+// Casa pide carta
+router.post("/:id/house/hit", houseHitController);
+
+// Casa se planta
+router.post("/:id/house/stand", houseStandController);
+
+// Casa elige valor del AS
+router.post("/:id/house/choose-ace", houseChooseAceController);
+
+// === RESOLUCIÓN DE GANADORES ===
+
+// Resolver ganadores (se llama automáticamente, pero está disponible manual)
+router.post("/:id/resolve", resolveWinnersController);
 
 export default router;
